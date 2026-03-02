@@ -61,7 +61,8 @@ def hf_load(dataset_id, config=None, split="train", select=None, trust_remote_co
     """Load a HuggingFace dataset safely, return None on failure."""
     from datasets import load_dataset
     try:
-        kwargs = dict(split=split, trust_remote_code=trust_remote_code)
+        # trust_remote_code is no longer supported — always omit it
+        kwargs = dict(split=split)
         if config:
             ds = load_dataset(dataset_id, config, **kwargs)
         else:
@@ -93,11 +94,13 @@ def download_m1():
     amazon_dir = DATA_DIR / "amazon_reviews"
     ds = hf_load(
         "McAuley-Lab/Amazon-Reviews-2023",
-        config="raw_review_Electronics",
+        config="0core_review_Electronics",  # parquet-native, no loading script
         split="full",
         select=10_000,
-        trust_remote_code=True,
     )
+    if ds is None:
+        print("  Trying fallback: amazon_polarity")
+        ds = hf_load("amazon_polarity", split="train", select=10_000)
     save_hf(ds, amazon_dir, "amazon_electronics_10k.csv")
 
     # Yelp Reviews — Kaggle
@@ -107,24 +110,34 @@ def download_m1():
     if SKIP_KAGGLE:
         print("  ⏭️  Skipped (--skip-kaggle)")
     else:
-        ok = run(f"kaggle datasets download -d yelp-dataset -p {yelp_dir} --unzip")
-        if ok:
-            # Sample 10k rows from the large review file
-            import pandas as pd, json
-            yelp_json = yelp_dir / "yelp_academic_dataset_review.json"
-            if yelp_json.exists():
-                records = []
-                with open(yelp_json) as f:
-                    for i, line in enumerate(f):
-                        if i >= 10_000:
-                            break
-                        records.append(json.loads(line))
-                pd.DataFrame(records).to_csv(yelp_dir / "yelp_review_sample.csv", index=False)
-                print(f"  ✅ Saved 10k Yelp reviews → {yelp_dir/'yelp_review_sample.csv'}")
-            else:
-                print("  ⚠️  yelp_academic_dataset_review.json not found after download")
+        kaggle_available = subprocess.run(
+            "kaggle --version", shell=True, capture_output=True
+        ).returncode == 0
+
+        if not kaggle_available:
+            print("  kaggle CLI not found. Install: pip install kaggle")
+            print("  API key setup: https://www.kaggle.com/docs/api#authentication")
+            print("  Trying HuggingFace fallback for Yelp reviews...")
+            ds_yelp = hf_load("Yelp/yelp_review_full", split="train", select=10_000)
+            save_hf(ds_yelp, yelp_dir, "yelp_review_sample.csv")
         else:
-            print("  ⚠️  Kaggle download failed — check ~/.kaggle/kaggle.json")
+            ok = run(f"kaggle datasets download -d yelp-dataset -p {yelp_dir} --unzip")
+            if ok:
+                import pandas as pd, json
+                yelp_json = yelp_dir / "yelp_academic_dataset_review.json"
+                if yelp_json.exists():
+                    records = []
+                    with open(yelp_json) as f:
+                        for i, line in enumerate(f):
+                            if i >= 10_000:
+                                break
+                            records.append(json.loads(line))
+                    pd.DataFrame(records).to_csv(yelp_dir / "yelp_review_sample.csv", index=False)
+                    print(f"  Saved 10k Yelp reviews -> {yelp_dir / 'yelp_review_sample.csv'}")
+                else:
+                    print("  yelp_academic_dataset_review.json not found after download")
+            else:
+                print("  Kaggle download failed -- check ~/.kaggle/kaggle.json")
 
 
 # ── Module 2 — Legal & Contracts ──────────────────────────────────────────────
@@ -200,7 +213,10 @@ def download_m4():
     if SKIP_KAGGLE:
         print("  ⏭️  Skipped (--skip-kaggle)")
     else:
-        run(f"kaggle datasets download -d stackoverflow-questions -p {so_dir} --unzip")
+        if subprocess.run("kaggle --version", shell=True, capture_output=True).returncode == 0:
+            run(f"kaggle datasets download -d stackoverflow-questions -p {so_dir} --unzip")
+        else:
+            print("  kaggle CLI not found. Install: pip install kaggle")
 
 
 # ── Module 5 — Healthcare / Clinical ─────────────────────────────────────────
@@ -215,7 +231,6 @@ def download_m5():
         config="med_qa_en_bigbio_qa",
         split="train",
         select=500,
-        trust_remote_code=True,
     )
     save_hf(ds, medqa_dir, "medqa_500.csv")
 
@@ -225,7 +240,10 @@ def download_m5():
     if SKIP_KAGGLE:
         print("  ⏭️  Skipped (--skip-kaggle)")
     else:
-        run(f"kaggle datasets download -d cherngs/heart-disease-cleveland-uci -p {heart_dir} --unzip")
+        if subprocess.run("kaggle --version", shell=True, capture_output=True).returncode == 0:
+            run(f"kaggle datasets download -d cherngs/heart-disease-cleveland-uci -p {heart_dir} --unzip")
+        else:
+            print("  kaggle CLI not found. Install: pip install kaggle")
 
 
 # ── Module 6 — Evaluation, Evals & LLMOps ────────────────────────────────────
